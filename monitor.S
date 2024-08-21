@@ -15,6 +15,8 @@
 # define REGBYTES 4
 #endif
 
+#include "tasklet_basic.h"
+
   .section ".text.init"
   .globl _start
 _start:
@@ -113,31 +115,6 @@ _start:
   la t0, trap_entry
   csrw mtvec, t0
 
-  # DK
-.if 0
-    # Clear Timer Interrupt (To kill timer interrupt. Is it needed?)
-    csrr a0, mhartid	# Hart ID
-    li a1, CLINT_BASE   # Load base address of CLINT
-    li a2, MTIMECMP_OFFSET # Offset for mtimecmp register
-    add a1, a1, a2      # Calculate address of mtimecmp register
-
-    li a3, MTIMECMP_OFFSET_HART # Offset per Hart (e.g., 4 KB)
-    mul a4, a0, a3 # a4 = Hart ID * Offset per Hart
-    add a1, a1, a4 # a1 = Base MTIMECMP Address + (Hart ID * Offset per Hart)
-
-    li a2, -1           # Load the maximum value to clear the timer interrupt
-    sd a2, 0(a1)        # Store value in mtimecmp to disable timer interrupt
-.endif
-.if 1
-    # Enable global interrupts (MIE)
-    csrsi mstatus, 0x8
-
-    # Enable software interrupts (MSIE)
-    li a1, 0x8
-    csrs mie, a1
-.endif
-  # end of DK
-
   # initialize global pointer
 .option push
 .option norelax
@@ -149,6 +126,8 @@ _start:
 
   # get core id
   csrr a0, mhartid
+
+.if 0	# original code
   # for now, assume only 1 core
   # DK: Hart[1..N] will loop infinitely here --> FIXIT
   li a1, 1
@@ -163,7 +142,81 @@ _start:
   add sp, sp, tp
 
   j _init	# DK: this calls main()
+.else
+  # get pointer to configuration data (a1)
+  # get SP
+  # get TP
+  bne a0, x0, m1
+  la a1, __config_mon0_start
+  la sp, __config_mon1_start
+  j mend
+m1: 
+  li a3, 1
+  bne a0, a3, m2
+  la a1, __config_mon1_start
+  la sp, __config_mon2_start
+  j mend
+m2: 
+  li a3, 2
+  bne a0, a3, mend
+  la a1, __config_mon2_start
+  la sp, __config_mon3_start
+mend:
 
+  # FIXIT: set up argument (to be done once tasklet CP data structure is fixed)
+  mv s1, a1	# config data start address
+  mv a0, a1
+  mv a1, sp	# SP
+  mv a2, gp	# GP
+  # call monitor_init, 
+  #   which initializes config data and TP, GP area.
+  #   return value is pointer to arg of monitor_main
+  jal monitor_init
+
+
+  # DK
+enable_int:
+.if 0
+    # Clear Timer Interrupt (To kill timer interrupt. Is it needed?)
+    csrr a0, mhartid	# Hart ID
+    li a1, CLINT_BASE   # Load base address of CLINT
+    li a2, MTIMECMP_OFFSET # Offset for mtimecmp register
+    add a1, a1, a2      # Calculate address of mtimecmp register
+
+    li a3, MTIMECMP_OFFSET_HART # Offset per Hart (e.g., 4 KB)
+    mul a4, a0, a3 # a4 = Hart ID * Offset per Hart
+    add a1, a1, a4 # a1 = Base MTIMECMP Address + (Hart ID * Offset per Hart)
+
+    li a2, -1           # Load the maximum value to clear the timer interrupt
+    sd a2, 0(a1)        # Store value in mtimecmp to disable timer interrupt
+.endif
+
+    # Enable global interrupts (MIE)
+    csrsi mstatus, 0x8
+
+    # Enable software interrupts (MSIE)
+    li a1, 0x8
+    csrs mie, a1
+  # end of DK
+
+  csrr a0, mhartid	# Hart ID
+  beq a0, x0, run_app
+
+init_loop:	# non-zero Hart
+  j init_loop
+.endif
+
+run_app:	# only Hart0 runs this
+  # a0 keep the same : config data start address
+  # setup sp, tp, gp
+  # s1 has config data start address
+  ld sp, 8(s1)	# tasklet_config->sp
+  ld tp, 16(s1) # tasklet_config->tp
+  ld gp, 24(s1) # tasklet_config->gp
+  mv a0, x0
+  mv a1, x0
+  jal main	# Master Controller of the Application
+  
   .align 2
 trap_entry:
   addi sp, sp, -272
@@ -200,10 +253,25 @@ trap_entry:
   SREG x30, 30*REGBYTES(sp)
   SREG x31, 31*REGBYTES(sp)
 
+.if 0
   csrr a0, mcause
   csrr a1, mepc
   mv a2, sp
   jal handle_trap
+.else
+#  csrr a0, mcause
+#  jal debug_trap
+  csrr a1, mhartid
+  la a0, __config_mon0_start
+  beq a1, x0, monitor0
+  li a2, CONFIG_MONITOR_SIZE
+  mul a1, a1, a2
+  add a0, a0, a1 
+monitor0:
+  ld tp, TPOFFSET(a0)
+/*  ld gp, GPOFFSET(a0) */	
+  jal monitor_main
+.endif
 
 .if 0 # original code DK thinks this is bug
   csrw mepc, a0
@@ -272,3 +340,4 @@ tohost: .dword 0
 .align 6
 .globl fromhost
 fromhost: .dword 0
+

@@ -8,7 +8,7 @@ int main()
 
 	init_uart();
 
-	print_uart("Init routine\n");
+	print_uart("Init PROM\n");
 
 	// jump to the address
 	__asm__ volatile(

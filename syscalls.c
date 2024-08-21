@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <sys/signal.h>
 #include "util.h"
+#include "monitor_utility.h"
 #include "uart.h"
 
 #undef strcmp
@@ -40,36 +41,6 @@ void __attribute__((noreturn)) tohost_exit(uintptr_t code)
 {
   tohost = (code << 1) | 1;
   while (1);
-}
-
-#if 0
-uintptr_t __attribute__((weak)) handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32])
-#else
-uintptr_t __attribute__((weak)) handle_trap(uint64_t cause, uint64_t epc, uint64_t regs[32])
-#endif
-{
-
-#if DK
-  char buf[64];
-//  sprintf(buf,"handle trap: mcause(%d), mepc(0x%lx)\n", cause, epc);
-//  printstr(buf);
-  if ((cause & ~(0xFFUL)) == 0x0UL) {
-    printstr("Exception\n");
-    clear_soft_int();
-  }
-  else if ((cause & 0xFFUL) == 0x3UL) {
- //   printstr("before monitor\n");
-    monitor();
-    clear_soft_int();
-  } else {
-    printstr("other interrupt\n");
-    clear_soft_int();
-  }
-  tohost = (1337 << 1) | 1;
-  return 0;
-#else
-  tohost_exit(1337);
-#endif
 }
 
 void exit(int code)
@@ -477,3 +448,48 @@ long atol(const char* str)
 
   return sign ? -res : res;
 }
+
+uintptr_t __attribute__((weak)) debug_trap(uint64_t cause) {
+  if ((cause & ~(0xFFUL)) == 0x0UL) {
+    printstr("Exception\n");
+  }
+  else if ((cause & 0xFFUL) == 0x3UL) {
+    printstr("call monitor_main\n");
+  } else {
+    printstr("other interrupt\n");
+  }
+}
+
+#if 0
+uintptr_t __attribute__((weak)) handle_trap(uintptr_t cause, uintptr_t epc, uintptr_t regs[32])
+#else
+
+extern void monitor();
+
+uintptr_t __attribute__((weak)) handle_trap(uint64_t cause, uint64_t epc, uint64_t regs[32])
+#endif
+{
+
+#if DK
+  char buf[64];
+//  sprintf(buf,"handle trap: mcause(%d), mepc(0x%lx)\n", cause, epc);
+//  printstr(buf);
+  if ((cause & ~(0xFFUL)) == 0x0UL) {
+    printstr("Exception\n");
+    clear_soft_int();
+  }
+  else if ((cause & 0xFFUL) == 0x3UL) {
+ //   printstr("before monitor\n");
+    monitor();
+    clear_soft_int();
+  } else {
+    printstr("other interrupt\n");
+    clear_soft_int();
+  }
+  tohost = (1337 << 1) | 1;
+  return 0;
+#else
+  tohost_exit(1337);
+#endif
+}
+
